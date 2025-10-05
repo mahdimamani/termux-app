@@ -1,0 +1,125 @@
+from ursina import *
+import math
+
+app = Ursina()
+
+window.title = "Driving Simulator with 3 Views and Real Model Option"
+window.borderless = False
+window.fullscreen = False
+window.color = color.rgb(100, 150, 200)
+
+# اگر مدل واقعی داری، از این خط استفاده می‌کنی؛ در غیر اینصورت مدل ساده:
+use_real_model = False
+real_model_path = "models/mercedes_w144.obj"  # مسیر مدل واقعی اگر داری
+
+if use_real_model:
+    car_body = Entity(model=real_model_path, scale=1, collider='box')
+else:
+    # مدل ساده ساخته با اشکال پایه
+    car_body = Entity(model='cube', scale=(1.8, 0.8, 3), color=color.gray, collider='box')
+    # شیشه جلو
+    glass = Entity(parent=car_body, model='cube', scale=(1.6, 0.4, 0.1),
+                   color=color.rgba(100, 150, 255, 150),
+                   position=(0, 0.2, -1.3))
+    # فرمان (دایره‌ای)
+    steering = Entity(parent=car_body, model='cylinder', scale=(0.25, 0.05, 0.25),
+                      color=color.black, position=(0, 0.7, -1.2), rotation=(90, 0, 0))
+    # داشبورد
+    dashboard = Entity(parent=car_body, model='cube', scale=(1.5, 0.3, 0.1),
+                       color=color.dark_gray, position=(0, 0.6, -1.3))
+
+car_speed = 0
+gear = 1
+max_speed = 6
+camera_views = ['behind', 'top', 'inside']
+current_view = 0
+
+ground = Entity(model='plane', texture='grass', scale=100, collider='box')
+
+# اهداف پارک (دو مرحله)
+parks = [
+    Entity(model='cube', color=color.azure, position=(10, 0.4, 10), scale=(2, 0.1, 2)),
+    Entity(model='cube', color=color.orange, position=(-8, 0.4, -12), scale=(2, 0.1, 2))
+]
+current_stage = 0
+score = 0
+stage_text = Text(text=f"Stage: {current_stage+1}/2", position=(-0.85, 0.45), scale=2, color=color.white)
+score_text = Text(text=f"Score: {score}", position=(-0.85, 0.38), scale=2, color=color.yellow)
+
+def update():
+    global car_speed, gear, current_stage, score
+
+    # گاز و ترمز
+    if held_keys['w']:
+        car_speed += 0.01 * gear
+    elif held_keys['s']:
+        car_speed -= 0.02
+    else:
+        car_speed *= 0.98
+
+    car_speed = clamp(car_speed, -max_speed, max_speed)
+
+    # حرکت
+    angle = math.radians(car_body.rotation_y)
+    car_body.z -= car_speed * time.dt * math.cos(angle)
+    car_body.x -= car_speed * time.dt * math.sin(angle)
+
+    # چرخش فرمان
+    if held_keys['a']:
+        car_body.rotation_y += 100 * time.dt
+        if not use_real_model:
+            steering.rotation_z = lerp(steering.rotation_z, 45, time.dt*4)
+    elif held_keys['d']:
+        car_body.rotation_y -= 100 * time.dt
+        if not use_real_model:
+            steering.rotation_z = lerp(steering.rotation_z, -45, time.dt*4)
+    else:
+        if not use_real_model:
+            steering.rotation_z = lerp(steering.rotation_z, 0, time.dt*4)
+
+    # دنده دستی
+    for i in range(1, 6):
+        if held_keys[str(i)]:
+            gear = i
+            invoke(setattr, held_keys, str(i), 0, delay=0.2)
+
+    # تغییر دید
+    if held_keys['v']:
+        change_view()
+
+    # موقعیت دوربین بنا به زاویه دید
+    if camera_views[current_view] == 'behind':
+        camera.position = car_body.position + Vec3(0, 2, 6)
+        camera.look_at(car_body)
+    elif camera_views[current_view] == 'top':
+        camera.position = car_body.position + Vec3(0, 15, 0)
+        camera.rotation_x = 90
+    elif camera_views[current_view] == 'inside':
+        camera.position = car_body.position + Vec3(0, 1, -1.2)
+        camera.rotation = (0, car_body.rotation_y, 0)
+
+    # چک پارک
+    park_zone = parks[current_stage]
+    if distance(car_body.position, park_zone.position) < 1.5 and abs(car_speed) < 0.2:
+        score += 100
+        score_text.text = f"Score: {score}"
+        current_stage += 1
+        if current_stage < len(parks):
+            parks[current_stage-1].color = color.green
+            stage_text.text = f"Stage: {current_stage+1}/2"
+        else:
+            finish_game()
+
+def finish_game():
+    Text(text=f"🎉 Congratulations!\nFinal Score: {score}", origin=(0,0), scale=3, color=color.lime, background=True)
+    application.pause()
+
+def change_view():
+    global current_view
+    current_view = (current_view + 1) % len(camera_views)
+    invoke(setattr, held_keys, 'v', 0, delay=0.3)
+
+DirectionalLight().look_at(Vec3(1, -1, -1))
+Sky()
+
+app.run()
